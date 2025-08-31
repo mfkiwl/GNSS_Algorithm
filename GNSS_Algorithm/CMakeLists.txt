@@ -7,7 +7,6 @@ set(CMAKE_CXX_FLAGS "-std=c++11")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
 include_directories("/usr/include/")
-include_directories("/usr/include/x86_64-linux-gnu/")
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 aux_source_directory(src SRC_LIST)

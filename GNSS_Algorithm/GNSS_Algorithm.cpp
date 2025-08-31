@@ -18,14 +18,14 @@ int main(int argc, char **argv)
 	gtime_t ts = { 0 }, te = { 0 };
 	double tint = 0.0, es[] = { 2022, 7, 21, 06, 44, 44 }, ee[] = { 2022, 7, 21, 06, 49, 01 }, pos[3] = {40.0680091,116.3355171,46};
 	int i, j, n, ret;
-	char *infile[MAXFILE] = {"F:\\GNSS_RTK\\GNSS_Algorithm\\GNSS_Algorithm\\data\\rover.obs",
-							 "F:\\GNSS_RTK\\GNSS_Algorithm\\GNSS_Algorithm\\data\\rover.nav"};
-	char *outfile =			{"F:\\GNSS_RTK\\GNSS_Algorithm\\GNSS_Algorithm\\data\\output.txt"};
+	char *infile[MAXFILE] = {"/mnt/e/gnss/rover.obs",
+							 "/mnt/e/gnss/rover.nav"};
+	char *outfile =			{"/mnt/e/gnss/output.txt"};
 
 	solopt.posf = SOLF_LLH;
 	solopt.timef = 1;
 	sprintf(solopt.prog, "%s ver.%s %s", PROGNAME, VER_RTKLIB, PATCH_LEVEL);
-	sprintf(filopt.trace, "F:\\GNSS_RTK\\GNSS_Algorithm\\GNSS_Algorithm\\data\\%s.trace", PROGNAME);
+	sprintf(filopt.trace, "/mnt/e/gnss/%s.trace", PROGNAME);
 
 	//ts = epoch2time(es);
 	//te = epoch2time(ee);

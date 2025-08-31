@@ -55,6 +55,7 @@ extern "C" {
 #define EXPORT
 #endif
 
+#define TRACE
 /* constants -----------------------------------------------------------------*/
 
 #define VER_RTKLIB  "demo5"             /* library version */
