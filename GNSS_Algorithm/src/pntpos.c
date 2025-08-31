@@ -44,7 +44,7 @@
 #define ERR_CBIAS   0.3         /* code bias error Std (m) */
 #define REL_HUMI    0.7         /* relative humidity for Saastamoinen model */
 #define MIN_EL      (5.0*D2R)   /* min elevation for measurement error (rad) */
-# define MAX_GDOP   30          /* max gdop for valid solution  */
+#define MAX_GDOP   30          	/* max gdop for valid solution  */
 
 #define VAR_POS     SQR(30.0)	/* initial variance of receiver pos (m^2) */
 #define VAR_VEL     SQR(10.0)	/* initial variance of receiver vel ((m/s)^2) */
