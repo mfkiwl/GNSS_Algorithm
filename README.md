@@ -1,6 +1,8 @@
-# GNSS Algorithm based on RTKLIB with linux version
+# GNSS Algorithm based on RTKLIB
 
-# 标准cmake编译流程:
+![GNSS-Explorer.png](https://github.com/brucezhcw/GNSS-Explorer/blob/linux/image/GNSS-Explorer.png) 
+
+## 标准cmake编译流程:
 ```
 cd GNSS_Algorithm
 mkdir build
