@@ -102,11 +102,11 @@ static const int nmea_solq[]={  /* NMEA GPS quality indicator [1] */
     /* 3=GPS PPS Mode, fix valid */
     /* 4=Real Time Kinematic. System used in RTK mode with fixed integers */
     /* 5=Float RTK. Satellite system used in RTK mode, floating integers */
-    /* 6=Estimated (dead reckoning) Mode */
+    /* 6=多普勒辅助的单点定位 */
     /* 7=Manual Input Mode */
     /* 8=Simulation Mode */
     SOLQ_NONE ,SOLQ_SINGLE, SOLQ_DGPS, SOLQ_PPP , SOLQ_FIX,
-    SOLQ_FLOAT,SOLQ_DR    , SOLQ_NONE, SOLQ_NONE, SOLQ_NONE
+    SOLQ_FLOAT,SOLQ_DOP_SINGLE, SOLQ_NONE, SOLQ_NONE, SOLQ_NONE
 };
 /* solution option to field separator ----------------------------------------*/
 static const char *opt2sep(const solopt_t *opt)
