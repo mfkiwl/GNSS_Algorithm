@@ -135,7 +135,7 @@ extern "C" {
 #define NEXOBS      0                   /* number of extended obs codes */
 #endif
 
-#define SNR_UNIT    1               /* SNR unit (dBHz) */
+#define SNR_UNIT    1                   /* SNR unit (dBHz) */
 
 #define MINPRNGPS   1                   /* min satellite PRN number of GPS */
 #define MAXPRNGPS   32                  /* max satellite PRN number of GPS */
@@ -181,7 +181,7 @@ extern "C" {
 #endif
 #ifdef ENACMP
 #define MINPRNCMP   1                   /* min satellite sat number of BeiDou */
-#define MAXPRNCMP   46                  /* max satellite sat number of BeiDou */
+#define MAXPRNCMP   63                  /* max satellite sat number of BeiDou */
 #define NSATCMP     (MAXPRNCMP-MINPRNCMP+1) /* number of BeiDou satellites */
 #define NSYSCMP     1
 #else
@@ -376,11 +376,11 @@ extern "C" {
 #define SOLQ_NONE   0                   /* solution status: no solution */
 #define SOLQ_FIX    1                   /* solution status: fix */
 #define SOLQ_FLOAT  2                   /* solution status: float */
-#define SOLQ_SBAS   3                   /* solution status: SBAS */
+#define SOLQ_DOP_SINGLE   3             /* solution status: 多普勒辅助的单点定位 */
 #define SOLQ_DGPS   4                   /* solution status: DGPS/DGNSS */
 #define SOLQ_SINGLE 5                   /* solution status: single */
 #define SOLQ_PPP    6                   /* solution status: PPP */
-#define SOLQ_DR     7                   /* solution status: dead reconing */
+#define SOLQ_SBAS   7                   /* solution status: SBAS */
 #define MAXSOLQ     7                   /* max number of solution status */
 
 #define TIMES_GPST  0                   /* time system: gps time */

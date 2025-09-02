@@ -44,7 +44,8 @@
 #define ERR_CBIAS   0.3         /* code bias error Std (m) */
 #define REL_HUMI    0.7         /* relative humidity for Saastamoinen model */
 #define MIN_EL      (5.0*D2R)   /* min elevation for measurement error (rad) */
-# define MAX_GDOP   30          /* max gdop for valid solution  */
+#define MIN_SNR     25  		/* min SNR for measurement error */
+#define MAX_GDOP    30        	/* max gdop for valid solution  */
 
 #define VAR_POS     SQR(30.0)	/* initial variance of receiver pos (m^2) */
 #define VAR_VEL     SQR(10.0)	/* initial variance of receiver vel ((m/s)^2) */
@@ -70,7 +71,7 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys,
     }
     if (el<MIN_EL) el=MIN_EL;
     /* var = R^2*(a^2 + (b^2/sin(el) + c^2*(10^(0.1*(snr_max-snr_rover)))) + (d*rcv_std)^2) */
-    varr=SQR(opt->err[1])+SQR(opt->err[2])/SQR(sin(el))/(sin(el));
+    varr=SQR(opt->err[1])+SQR(opt->err[2])/SQR(sin(el));
 	//snr_rover = SNR_UNIT*obs->SNR[freq];
 	//pow(10, (snr_rover - 50) / 30)*(1 - (30/(pow(10,(50-10)/30)-1))*(snr_rover - 50) / (50-10));
 	//snrweight = pow(10, (snr_rover - 50) / 30)*(1 - 1.460255716*(snr_rover - 50) / 40);
@@ -118,8 +119,7 @@ static double gettgd(int sat, const nav_t *nav, int type)
             if (nav->geph[i].sat==sat) break;
         }
         return (i>=nav->ng)?0.0:-nav->geph[i].dtaun*CLIGHT;
-    }
-    else {
+    } else {
         for (i=0;i<nav->n;i++) {
             if (nav->eph[i].sat==sat) break;
         }
@@ -131,18 +131,16 @@ static int snrmask(const obsd_t *obs, const double *azel, const prcopt_t *opt)
 {
     int f2;
 
-    if (testsnr(0,0,azel[1],obs->SNR[0]*SNR_UNIT,&opt->snrmask)) {
-        return 0;
-    }
+    if (obs->SNR[0]*SNR_UNIT<MIN_SNR) return 0;
     if (opt->ionoopt==IONOOPT_IFLC) {
         f2=2;
-        if (testsnr(0,f2,azel[1],obs->SNR[f2]*SNR_UNIT,&opt->snrmask)) return 0;
+        if (obs->SNR[f2]*SNR_UNIT<MIN_SNR) return 0;
     }
+
     return 1;
 }
 /* iono-free or "pseudo iono-free" pseudorange with code bias correction -----*/
-static double prange(const obsd_t *obs, const nav_t *nav, const prcopt_t *opt,
-                     double *var)
+static double prange(const obsd_t *obs, const nav_t *nav, const prcopt_t *opt, double *var)
 {
     double PC,P1,P2,gamma,b1,b2;
     int sat,sys,f2;
@@ -242,155 +240,127 @@ static double prange_mulfreq(const obsd_t *obs, const nav_t *nav, const prcopt_t
 	P2 = obs->P[2];
 	*var = 0.0;
 
-	if ((P1 == 0.0 && P2 == 0.0) || (opt->ionoopt == IONOOPT_IFLC && (P1 == 0.0 || P2 == 0.0)))
-		return 0.0;
+	if ((P1 == 0.0 && P2 == 0.0) || (opt->ionoopt == IONOOPT_IFLC && (P1 == 0.0 || P2 == 0.0))) return 0.0;
 
 	/* P1-C1,P2-C2 DCB correction */
-	if (sys == SYS_GPS || sys == SYS_GLO)
-	{
-		if (obs->code[0] == CODE_L1C)
-			P1 += nav->cbias[sat - 1][1]; /* C1->P1 */
-		if (obs->code[2] == CODE_L2C)
-			P2 += nav->cbias[sat - 1][2]; /* C2->P2 */
+	if (sys == SYS_GPS || sys == SYS_GLO) {
+		if (obs->code[0] == CODE_L1C) P1 += nav->cbias[sat - 1][1]; /* C1->P1 */
+		if (obs->code[2] == CODE_L2C) P2 += nav->cbias[sat - 1][2]; /* C2->P2 */
 	}
-	if (opt->ionoopt == IONOOPT_IFLC)
-	{ /* dual-frequency */
-
-		if (sys == SYS_GPS || sys == SYS_QZS)
-		{ /* L1-L2,G1-G2 */
-			//gamma = SQR(FREQL1 / FREQL2);
+	if (opt->ionoopt == IONOOPT_IFLC) {
+		/* dual-frequency */
+		if (sys == SYS_GPS || sys == SYS_QZS) {
+			/* L1-L5 */
 			gamma = SQR(FREQL1 / FREQL5);
 			return (P2 - gamma * P1) / (1.0 - gamma);
-		}
-		else if (sys == SYS_GLO)
-		{ /* G1-G2 */
+		} else if (sys == SYS_GLO) {
+			/* G1-G2 */
 			gamma = SQR(FREQ1_GLO / FREQ2_GLO);
 			return (P2 - gamma * P1) / (1.0 - gamma);
-		}
-		else if (sys == SYS_GAL)
-		{ /* E1-E5b */
-			//gamma = SQR(FREQL1 / FREQE5b);
+		} else if (sys == SYS_GAL) {
+			/* E1-E5a */
 			gamma = SQR(FREQL1 / FREQL5);
-			//if (getseleph(SYS_GAL))
-			{                                                    /* F/NAV */
-				//P2 -= gettgd(sat, nav, 0) - gettgd(sat, nav, 1); /* BGD_E5aE5b */
-			}
+			// if (getseleph(SYS_GAL))
+			// {                                                    /* F/NAV */
+			// 	P2 -= gettgd(sat, nav, 0) - gettgd(sat, nav, 1); /* BGD_E5aE5b */
+			// }
 			return (P2 - gamma * P1) / (1.0 - gamma);
-		}
-		else if (sys == SYS_CMP)
-		{ /* B1-B2 */
+		} else if (sys == SYS_CMP) {
+			/* B1-B2 */
 			//gamma = SQR(((obs->code[0] == CODE_L2I) ? FREQ1_CMP : FREQL1) / FREQ2_CMP);
 			gamma = SQR(((obs->code[0] == CODE_L2I) ? FREQ1_CMP : FREQL1) / FREQL5);
-			if (obs->code[0] == CODE_L2I)
-				b1 = gettgd(sat, nav, 0); /* TGD_B1I */
-			else if (obs->code[0] == CODE_L1P)
-				b1 = gettgd(sat, nav, 2); /* TGD_B1Cp */
-			else
-				b1 = gettgd(sat, nav, 2) + gettgd(sat, nav, 4); /* TGD_B1Cp+ISC_B1Cd */
+			if (obs->code[0] == CODE_L2I) b1 = gettgd(sat, nav, 0); /* TGD_B1I */
+			else if (obs->code[0] == CODE_L1P) b1 = gettgd(sat, nav, 2); /* TGD_B1Cp */
+			else b1 = gettgd(sat, nav, 2) + gettgd(sat, nav, 4); /* TGD_B1Cp+ISC_B1Cd */
 			//b2 = gettgd(sat, nav, 1);                           /* TGD_B2I/B2bI (m) */
 			b2 = 0.0;
 			return ((P2 - gamma * P1) - (b2 - gamma * b1)) / (1.0 - gamma);
-		}
-		else if (sys == SYS_IRN)
-		{ /* L5-S */
+		} else if (sys == SYS_IRN) {
+			/* L5-S */
 			gamma = SQR(FREQL5 / FREQs);
 			return (P2 - gamma * P1) / (1.0 - gamma);
 		}
-	}
-	else
-	{ /* single-freq */
-		if (k < 0 || k >= (NFREQ + NEXOBS))
-		{
+	} else {
+		/* single-freq */
+		if (k < 0 || k >= (NFREQ + NEXOBS)) {
 			return 0.0;
 		}
 		P = obs->P[k];
 		*var = SQR(ERR_CBIAS);
 		tgd = 0.0;
-		if (sys == SYS_GPS || sys == SYS_QZS)
-		{
+		if (sys == SYS_GPS || sys == SYS_QZS) {
 			gamma = SQR(FREQL1 / FREQL2);
 			b1 = gettgd(sat, nav, 0); /* TGD (m) */
-			switch (obs->code[k])
-			{
+			switch (obs->code[k]) {
 				/*for L1C, we need to calibrate the DCB between P1 and C1. but here we ignore it*/
-			case CODE_L1C:
-			case CODE_L1P:
-				tgd = b1;
-				break;
-				/*for L2P, calibrate tgd according the paper*/
-			case CODE_L2P:
-			case CODE_L2W:
-				tgd = b1 * gamma;
-				break;
-				/*no L5 tgd info in broadcast nav, give the default value 0*/
-			case CODE_L5Q:
-				tgd = 0.0;
-				break;
+				case CODE_L1C:
+				case CODE_L1P:
+					tgd = b1;
+					break;
+					/*for L2P, calibrate tgd according the paper*/
+				case CODE_L2P:
+				case CODE_L2W:
+					tgd = b1 * gamma;
+					break;
+					/*no L5 tgd info in broadcast nav, give the default value 0*/
+				case CODE_L5Q:
+					tgd = 0.0;
+					break;
 			}
-		}
-		else if (sys == SYS_GLO)
-		{   /*for GLO, the logic may has error*/
+		} else if (sys == SYS_GLO) {   /*for GLO, the logic may has error*/
 			gamma = SQR(FREQ1_GLO / FREQ2_GLO);
 			b1 = gettgd(sat, nav, 0); /* -dtaun (m) */
 			b1 = b1 / (gamma - 1.0);
-			switch (obs->code[k])
-			{
-			case CODE_L1C:
-			case CODE_L1P:
-				tgd = b1;
-				break;
-			case CODE_L2C:
-			case CODE_L2P:
-				tgd = b1 * gamma;
-				break;
+			switch (obs->code[k]) {
+				case CODE_L1C:
+				case CODE_L1P:
+					tgd = b1;
+					break;
+				case CODE_L2C:
+				case CODE_L2P:
+					tgd = b1 * gamma;
+					break;
+			}
+		} else if (sys == SYS_GAL) {   /*for GAL sys, there is two ephemerises*/
+			if (getseleph(SYS_GAL)) b1 = gettgd(sat, nav, 0); /* BGD_E1E5a */
+			else 					b1 = gettgd(sat, nav, 1); /* BGD_E1E5b */
+			switch (obs->code[k]) {
+				case CODE_L1C:
+					tgd = b1;
+					break;
+				case CODE_L5Q:
+					gamma = SQR(FREQL1 / FREQL5);
+					tgd = b1 * gamma;
+					break;
+				case CODE_L7Q:
+					gamma = SQR(FREQL1 / FREQE5b);
+					tgd = b1 * gamma;
+					break;
+			}
+		} else if (sys == SYS_CMP) {
+			switch (obs->code[k]) {
+				case CODE_L2I:
+					tgd = gettgd(sat, nav, 0);
+					break;
+				case CODE_L7I:
+					tgd = gettgd(sat, nav, 1);
+					break;
+					/*for BDS sys, the reference frequency is 6I. that's why the correction in 6I is zeror*/
+				case CODE_L6I:
+					tgd = 0.0;
+					break;
+				case CODE_L1P:
+					tgd = gettgd(sat, nav, 2);
+					break;
+				case CODE_L5P:
+					tgd = gettgd(sat, nav, 3);
+					break;
 			}
 		}
 
-		else if (sys == SYS_GAL)
-		{   /*for GAL sys, there is two ephemerises*/
-			if (getseleph(SYS_GAL))
-				b1 = gettgd(sat, nav, 0); /* BGD_E1E5a */
-			else
-				b1 = gettgd(sat, nav, 1); /* BGD_E1E5b */
-			switch (obs->code[k])
-			{
-			case CODE_L1C:
-				tgd = b1;
-				break;
-			case CODE_L5Q:
-				gamma = SQR(FREQL1 / FREQL5);
-				tgd = b1 * gamma;
-				break;
-			case CODE_L7Q:
-				gamma = SQR(FREQL1 / FREQE5b);
-				tgd = b1 * gamma;
-				break;
-			}
-		}
-		else if (sys == SYS_CMP)
-		{
-			switch (obs->code[k])
-			{
-			case CODE_L2I:
-				tgd = gettgd(sat, nav, 0);
-				break;
-			case CODE_L7I:
-				tgd = gettgd(sat, nav, 1);
-				break;
-				/*for BDS sys, the reference frequency is 6I. that's why the correction in 6I is zeror*/
-			case CODE_L6I:
-				tgd = 0.0;
-				break;
-			case CODE_L1P:
-				tgd = gettgd(sat, nav, 2);
-				break;
-			case CODE_L5P:
-				tgd = gettgd(sat, nav, 3);
-				break;
-			}
-		}
 		return P - tgd;
 	}
+
 	return P1;
 }
 /* ionospheric correction ------------------------------------------------------
@@ -696,11 +666,9 @@ static int rescode_mulfreq(int iter, const obsd_t *obs, int n, const double *rs,
 	return nv;
 }
 /* pseudorange residuals -----------------------------------------------------*/
-static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double *rs,
-	const double *dts, const double *vare, const int *svh,
-	const nav_t *nav, const double *x, const prcopt_t *opt,
-	double *v, double *H, double *var, double *azel, int *vsat,
-	double *resp, int *ns, ssat_t *ssat)
+static int rescode_mulfreq_ekf(const obsd_t *obs, int n, const double *rs, const double *dts, const double *vare, const int *svh,
+							   const nav_t *nav, const double *x, const prcopt_t *opt, double *v, double *H, double *var,
+							   double *azel, int *vsat, double *resp, int *ns, ssat_t *ssat)
 {
 	gtime_t time;
 	double r, freq, dion_ref = 0.0, dion = 0.0, dtrp = 0.0, vmeas, vion = 0.0, vtrp = 0.0, rr[3], pos[3], dtr = 0.0, e[3], P;
@@ -710,8 +678,7 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 	trace(3, "rescode_mulfreq_ekf : n=%d\n", n);
 
 	nf = (opt->spp_mode == SPP_MODE_LX) ? opt->nf : 1;
-	for (i = 0; i < 3; i++)
-		rr[i] = x[i];
+	for (i = 0; i < 3; i++) rr[i] = x[i];
 	dtr = x[9];
 
 	ecef2pos(rr, pos);
@@ -723,8 +690,7 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 		sat = obs[i].sat;
 		if (!(sys = satsys(sat, NULL))) continue;
 		/* reject duplicated observation data */
-		if (i < n - 1 && i < MAXOBS - 1 && sat == obs[i + 1].sat)
-		{
+		if (i < n - 1 && i < MAXOBS - 1 && sat == obs[i + 1].sat) {
 			trace(2, "duplicated obs data %s sat=%d\n", time_str(time, 3), sat);
 			i++;
 			continue;
@@ -733,83 +699,64 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 		if (satexclude(sat, vare[i], svh[i], opt)) continue;
 		/* geometric distance */
 		if ((r = geodist(rs + i * 6, rr, e)) <= 0.0) continue;
-
-		if (iter > 0)
-		{
-			/* test elevation mask */
-			if (satazel(pos, e, azel + i * 2) < opt->elmin) continue;
-			/* test SNR mask */
-			if (!snrmask(obs + i, azel + i * 2, opt)) continue;
-			/* ionospheric correction */
-			if (!ionocorr(time, nav, sat, pos, azel + i * 2, opt->ionoopt, &dion_ref, &vion)) continue;
-			/* tropospheric correction */
-			if (!tropcorr(time, nav, pos, azel + i * 2, opt->tropopt, &dtrp, &vtrp)) continue;
-		}
+		/* test elevation mask */
+		if (satazel(pos, e, azel + i * 2) < opt->elmin) continue;
+		/* test SNR mask */
+		if (!snrmask(obs + i, azel + i * 2, opt)) continue;
+		/* ionospheric correction */
+		if (!ionocorr(time, nav, sat, pos, azel + i * 2, opt->ionoopt, &dion_ref, &vion)) continue;
+		/* tropospheric correction */
+		if (!tropcorr(time, nav, pos, azel + i * 2, opt->tropopt, &dtrp, &vtrp)) continue;
 
 		for (freq_idx = 0; freq_idx < nf; freq_idx++)
 		{
 			dion = dion_ref;
-			if (iter > 0)
-			{
-				if ((freq = sat2freq(sat, obs[i].code[freq_idx], nav)) == 0.0)
-					continue;
-				dion *= SQR(FREQL1 / freq);
-				vion *= SQR(FREQL1 / freq);
-			}
+			if ((freq = sat2freq(sat, obs[i].code[freq_idx], nav)) == 0.0) continue;
 
-			if (opt->ionoopt == IONOOPT_IFLC){
+			dion *= SQR(FREQL1 / freq);
+			vion *= SQR(FREQL1 / freq);
+
+			if (opt->ionoopt == IONOOPT_IFLC) {
 				dion = 0.0;
 				vion = 0.0;
 			}
-
 			/* psendorange with code bias correction */
 			if ((P = prange_mulfreq(obs + i, nav, opt, freq_idx, &vmeas)) == 0.0) continue;
-
-			//if (ssat[obs[i].sat-1].lock_P[0][freq_idx]<10) continue;
+			//if (ssat[obs[i].sat-1].lock_P[obs[i].rcv-1][freq_idx]<2) continue;
 			/* pseudorange residual */
 			v[nv] = P - (r + dtr - CLIGHT * dts[i * 2] + dion + dtrp);
-
 			/* design matrix */
-			for (j = 0; j < NX_F; j++)
-			{
+			for (j = 0; j < NX_F; j++) {
 				H[j + nv * NX_F] = j < 3 ? -e[j] : (j == 9 ? 1.0 : 0.0);
 			}
 			/* time system offset and receiver bias correction */
-			if (sys == SYS_GLO)
-			{
+			if (sys == SYS_GLO) {
 				v[nv] -= x[10];
 				H[10 + nv * NX_F] = 1.0;
 				mask[1] = 1;
 			}
-			else if (sys == SYS_GAL)
-			{
+			else if (sys == SYS_GAL) {
 				v[nv] -= x[11];
 				H[11 + nv * NX_F] = 1.0;
 				mask[2] = 1;
-			}
-			else if (sys == SYS_CMP)
+			} else if (sys == SYS_CMP)
 			{
 				v[nv] -= x[12];
 				H[12 + nv * NX_F] = 1.0;
 				mask[3] = 1;
-			}
-			else if (sys == SYS_IRN)
-			{
+			} else if (sys == SYS_IRN) {
 				v[nv] -= x[13];
 				H[13 + nv * NX_F] = 1.0;
 				mask[4] = 1;
-			}
-			else
+			} else {
 				mask[0] = 1;
+			}
 
 			vsat[i] = 1;
 			resp[i] = v[nv];
-
 			/* variance of pseudorange error */
 			var[nv] = varerr(opt, &obs[i], azel[1 + i * 2], sys, freq_idx);
-			if (v[nv]<-20 || v[nv]>20) var[nv] *= SQR(30);
-			else if (fabs(v[nv])>10)
-			{
+			if (fabs(v[nv]) > 10) {
 				var[nv] *= SQR(fabs(v[nv] / 10));
 			}
 			nv++;
@@ -820,18 +767,17 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 		(*ns)++;
 	}
 	/* constraint to avoid rank-deficient */
-	for (i = 0; i < NX_F - 9; i++)
-	{
+	for (i = 0; i < NX_F - 9; i++) {
 		if (mask[i]) continue;
 		v[nv] = 0.0;
 		for (j = 0; j < NX_F; j++) H[j + nv * NX_F] = j == i + 9 ? 1.0 : 0.0;
 		var[nv++] = SQR(0.01);
 	}
+
 	return nv;
 }
-static int resdop_mulfreq_ekf(const obsd_t *obs, const int n, const double *rs, const double *dts,
-                                 const nav_t *nav, const double *rr, const prcopt_t *opt, const double *x,
-                                 const double *azel, const int *vsat, double *v, double *var, double *H)
+static int resdop_mulfreq_ekf(const obsd_t *obs, const int n, const double *rs, const double *dts, const nav_t *nav, const double *rr,
+							  const prcopt_t *opt, const double *x, const double *azel, const int *vsat, double *v, double *var, double *H)
 {
     double freq, rate, pos[3], E[9], a[3], e[3], vs[3], cosel, sig, e_ref[3] = {0.0}, v_ref = 0.0, ele_ref=0.0;
     int i, j, nv = 0, sys, freq_idx, SNR_ref=0, ind_ref=-1, freq_ref=-1;;
@@ -843,18 +789,15 @@ static int resdop_mulfreq_ekf(const obsd_t *obs, const int n, const double *rs, 
 
 	for (i = 0; i < n && i < MAXOBS; i++)
     {
-
         if (!(sys = satsys(obs[i].sat, NULL)) || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0) continue;
 
-        for (freq_idx = 0; freq_idx < opt->nf; freq_idx++)
-        {
+        for (freq_idx = 0; freq_idx < opt->nf; freq_idx++) {
             freq = sat2freq(obs[i].sat, obs[i].code[freq_idx], nav);
 
             if (obs[i].D[freq_idx] == 0.0 || freq == 0.0) continue;
 
 			if (ind_ref == -1 || (obs[i].SNR[freq_idx]>=SNR_ref && azel[1 + i * 2] * R2D>ele_ref) ||
-								 (obs[i].SNR[freq_idx]>SNR_ref && azel[1 + i * 2] * R2D>ele_ref-5))
-            {
+								 (obs[i].SNR[freq_idx]>SNR_ref && azel[1 + i * 2] * R2D>ele_ref-5)) {
 				ele_ref = azel[1 + i * 2] * R2D;
 				SNR_ref = obs[i].SNR[freq_idx];
 				ind_ref = i;
@@ -862,38 +805,29 @@ static int resdop_mulfreq_ekf(const obsd_t *obs, const int n, const double *rs, 
             }
         }
     }
-
 	if (ind_ref == -1) return 0;
-
 	/* LOS (line-of-sight) vector in ECEF */
 	cosel = cos(azel[1 + ind_ref * 2]);
 	a[0] = sin(azel[ind_ref * 2]) * cosel;
 	a[1] = cos(azel[ind_ref * 2]) * cosel;
 	a[2] = sin(azel[1 + ind_ref * 2]);
 	matmul("TN", 3, 1, 3, 1.0, E, a, 0.0, e);
-
 	/* satellite velocity relative to receiver in ECEF */
-	for (j = 0; j < 3; j++)
-	{
+	for (j = 0; j < 3; j++) {
 		vs[j] = rs[j + 3 + ind_ref * 6] - x[j];
 	}
-
 	/* range rate with earth rotation correction */
 	rate = dot(vs, e, 3) + OMGE / CLIGHT * (rs[4 + ind_ref * 6] * rr[0] + rs[1 + ind_ref * 6] * x[0] - rs[3 + ind_ref * 6] * rr[1] - rs[ind_ref * 6] * x[1]);
-
 	freq = sat2freq(obs[ind_ref].sat, obs[ind_ref].code[freq_ref], nav);
-
 	/* range rate residual (m/s). */
 	v_ref = (-obs[ind_ref].D[freq_ref] * CLIGHT / freq - (rate - CLIGHT * dts[1 + ind_ref * 2]));
-	for (j = 0; j < 3; j++)
-	{
+	for (j = 0; j < 3; j++) {
 		e_ref[j] = -e[j];
 	}
 	trace(3, "reference sat=%3d azel=%5.1f %4.1f f=%1d SNR=%2d\n", obs[ind_ref].sat, azel[ind_ref * 2] * R2D, ele_ref, freq_ref + 1, SNR_ref);
 
     for (i = 0; i < n && i < MAXOBS; i++)
     {
-
         if (!(sys = satsys(obs[i].sat, NULL)) || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0) continue;
         /* LOS (line-of-sight) vector in ECEF */
         cosel = cos(azel[1 + i * 2]);
@@ -902,45 +836,34 @@ static int resdop_mulfreq_ekf(const obsd_t *obs, const int n, const double *rs, 
         a[2] = sin(azel[1 + i * 2]);
         matmul("TN", 3, 1, 3, 1.0, E, a, 0.0, e);
         /* satellite velocity relative to receiver in ECEF */
-        for (j = 0; j < 3; j++)
-        {
+        for (j = 0; j < 3; j++) {
             vs[j] = rs[j + 3 + i * 6] - x[j];
         }
-
         /* range rate with earth rotation correction */
         rate = dot(vs, e, 3) + OMGE / CLIGHT * (rs[4 + i * 6] * rr[0] + rs[1 + i * 6] * x[0] - rs[3 + i * 6] * rr[1] - rs[i * 6] * x[1]);
-
-        for (freq_idx = 0; freq_idx < opt->nf; freq_idx++)
-        {
+        for (freq_idx = 0; freq_idx < opt->nf; freq_idx++) {
             freq = sat2freq(obs[i].sat, obs[i].code[freq_idx], nav);
 
             if (obs[i].D[freq_idx] == 0.0 || freq == 0.0) continue;
-
 			if (i == ind_ref && freq_idx == freq_ref) continue;
-
             /* range rate residual (m/s). */
             v[nv] = (-obs[i].D[freq_idx] * CLIGHT / freq - (rate - CLIGHT * dts[1 + i * 2])) - v_ref;
-
             /* variance of doppler error */
 			var[nv] = varerr_dop(opt, &obs[i], azel[1 + i * 2], sys, freq_idx);
-			if (v[nv]<-1.0 || v[nv]>1.0) var[nv] *= SQR(30);
-			else if (fabs(v[nv])>0.5)
-			{
+			if (fabs(v[nv])>0.5) {
 				var[nv] *= SQR(fabs(v[nv]) / 0.5);
 			}
-
             /* design matrix */
-            for (j = 0; j < 3; j++)
-            {
+            for (j = 0; j < 3; j++) {
                 H[j + 3 + nv * NX_F] = -e[j] - e_ref[j];
             }
-            
             nv++;
 
 			trace(3, "sat=%3d azel=%5.1f %4.1f f=%1d snr=%2d residual=%7.3f sig=%5.3f\n", obs[i].sat, azel[i * 2] * R2D, azel[1 + i * 2] * R2D,
 				freq_idx + 1, obs[i].SNR[freq_idx], v[nv - 1], sqrt(var[nv - 1]));
         }
     }
+
     return nv;
 }
 /* validate solution ---------------------------------------------------------*/
@@ -1041,29 +964,19 @@ static int estpos(const obsd_t *obs, int n, const double *rs, const double *dts,
     free(v); free(H); free(var);
     return 0;
 }
-static void init_spp(rtk_t*rtk){
+static void init_spp(rtk_t*rtk)
+{
 	int i = 0, j = 0;
-	if (!rtk->x_spp)
-	{
-		rtk->x_spp = zeros(NX_F, 1);
-	}
-	if (!rtk->P_spp)
-	{
-		rtk->P_spp = zeros(NX_F, NX_F);
-	}
-	for (i = 0; i < NX_F; i++)
-	{
-		rtk->x_spp[i] = 0.0;
-		for (j = 0; j < NX_F; j++)
-		{
-			rtk->P_spp[i * NX_F + j] = 0.0;
-		}
-	}
 
-	for (i = 0; i < MAXSAT; i++)
-	{
-		for (j = 0; j < rtk->opt.nf; j++)
-		{
+	if (!rtk->x_spp) rtk->x_spp = zeros(NX_F, 1);
+	if (!rtk->P_spp) rtk->P_spp = zeros(NX_F, NX_F);
+
+	for (i = 0; i < NX_F; i++) {
+		rtk->x_spp[i] = 0.0;
+		for (j = 0; j < NX_F; j++) rtk->P_spp[i * NX_F + j] = 0.0;
+	}
+	for (i = 0; i < MAXSAT; i++) {
+		for (j = 0; j < rtk->opt.nf; j++) {
 			rtk->ssat[i].lock_P[0][j] = 0;
 			rtk->ssat[i].lock_P[1][j] = 0;
 		}
@@ -1073,9 +986,9 @@ static void init_spp(rtk_t*rtk){
 static void initx(rtk_t *rtk, double xi, double var, int i)
 {
 	int j;
+
 	rtk->x_spp[i] = xi;
-	for (j = 0; j < NX_F; j++)
-	{
+	for (j = 0; j < NX_F; j++) {
 		rtk->P_spp[i + j * NX_F] = rtk->P_spp[j + i * NX_F] = i == j ? var : 0.0;
 	}
 }
@@ -1087,68 +1000,37 @@ static void udpos_spp(rtk_t *rtk, double tt)
 
 	trace(3, "udpos_spp   : tt=%.3f\n", tt);
 
-	/* initialize position for first epoch */
-	if (norm(rtk->x_spp, 3) <= 0.0)
-	{
-		for (i = 0; i < 3; i++)
-			initx(rtk, rtk->sol.rr[i], VAR_POS, i);
-		for (i = 3; i < 6; i++)
-			initx(rtk, rtk->sol.rr[i], VAR_VEL, i);
-		for (i = 6; i < 9; i++)
-			initx(rtk, 1E-6, VAR_ACC, i);
-	}
-
 	/* check variance of estimated postion */
-	for (i = 0; i < 3; i++)
-		var += rtk->P_spp[i + i * NX_F];
+	for (i = 0; i < 3; i++) var += rtk->P_spp[i + i * NX_F];
 	var /= 3.0;
 	trace(3, "EKF pos var: %.4f\n", var);
-	if (var > VAR_POS)
-	{
+	if (var > VAR_POS) {
 		/* reset position with large variance */
-		for (i = 0; i < 3; i++)
-			initx(rtk, rtk->sol.rr[i], VAR_POS, i);
-		for (i = 3; i < 6; i++)
-			initx(rtk, rtk->sol.rr[i], VAR_VEL, i);
-		for (i = 6; i < 9; i++)
-			initx(rtk, 1E-6, VAR_ACC, i);
+		for (i = 0; i < 3; i++) initx(rtk, rtk->sol.rr[i], VAR_POS, i);
+		for (i = 3; i < 6; i++) initx(rtk, rtk->sol.rr[i], VAR_VEL, i);
+		for (i = 6; i < 9; i++) initx(rtk, 1E-2, VAR_ACC, i);
 		trace(2, "reset EKF position due to large variance: var=%.3f\n", var);
 		return;
 	}
 	/* generate valid state index */
 	ix = imat(NX_F, 1);
-	for (i = nx = 0; i < NX_F; i++)
-	{
+	for (i = nx = 0; i < NX_F; i++) {
 		if (i < 9) ix[nx++] = i;
 	}
-	if (nx < 9)
-	{
-		free(ix);
-		return;
-	}
 	/* state transition of position/velocity/acceleration */
-	F = eye(nx);
-	P = mat(nx, nx);
-	FP = mat(nx, nx);
-	x = mat(nx, 1);
-	xp = mat(nx, 1);
+	F = eye(nx); P = mat(nx, nx); FP = mat(nx, nx); x = mat(nx, 1); xp = mat(nx, 1);
 
-	for (i = 0; i < 6; i++)
-	{
+	for (i = 0; i < 6; i++) {
 		F[i + (i + 3) * nx] = tt;
 	}
-	if (var < 0.9)
-	{ /* include accel terms if EKF filter is converged */
-		for (i = 0; i < 3; i++)
-		{
+	if (var < 0.9) { /* include accel terms if EKF filter is converged */
+		for (i = 0; i < 3; i++) {
 			F[i + (i + 6) * nx] = SQR(tt) / 2.0;
 		}
 	}
-	for (i = 0; i < nx; i++)
-	{
+	for (i = 0; i < nx; i++) {
 		x[i] = rtk->x_spp[ix[i]];
-		for (j = 0; j < nx; j++)
-		{
+		for (j = 0; j < nx; j++) {
 			P[i + j * nx] = rtk->P_spp[ix[i] + ix[j] * NX_F];
 		}
 	}
@@ -1156,18 +1038,15 @@ static void udpos_spp(rtk_t *rtk, double tt)
 	matmul("NN", nx, 1, nx, 1.0, F, x, 0.0, xp);
 	matmul("NN", nx, nx, nx, 1.0, F, P, 0.0, FP);
 	matmul("NT", nx, nx, nx, 1.0, FP, F, 0.0, P);
-
 	/*trace the mat*/
 	trace(3, "xp=\n");
 	tracemat(3, xp, 1, nx, 7, 3);
 	trace(3, "Pp=\n");
 	tracemat(3, P, nx, nx, 7, 3);
 
-	for (i = 0; i < nx; i++)
-	{
+	for (i = 0; i < nx; i++) {
 		rtk->x_spp[ix[i]] = xp[i];
-		for (j = 0; j < nx; j++)
-		{
+		for (j = 0; j < nx; j++) {
 			rtk->P_spp[ix[i] + ix[j] * NX_F] = P[i + j * nx];
 		}
 	}
@@ -1176,17 +1055,12 @@ static void udpos_spp(rtk_t *rtk, double tt)
 	Q[8] = SQR(2.0) * SQR(tt);
 	ecef2pos(rtk->x_spp, pos);
 	covecef(pos, Q, Qv);
-	for (i = 0; i < 3; i++)
-		for (j = 0; j < 3; j++)
-		{
+	for (i = 0; i < 3; i++) {
+		for (j = 0; j < 3; j++) {
 			rtk->P_spp[i + 6 + (j + 6) * NX_F] += Qv[i + j * 3];
 		}
-	free(ix);
-	free(F);
-	free(P);
-	free(FP);
-	free(x);
-	free(xp);
+	}
+	free(ix); free(F); free(P); free(FP); free(x); free(xp);
 }
 static int udobs_rover(const obsd_t *obs, int n, rtk_t *rtk)
 {
@@ -1195,66 +1069,49 @@ static int udobs_rover(const obsd_t *obs, int n, rtk_t *rtk)
 
 	for (freq = 0; freq < rtk->opt.nf; freq++)
 	{
-		for (i = 0; i < MAXSAT; i++)
-		{
-			track_index[i] = 0;
-		}
-		for (i = 0; i < n && i < MAXOBS; i++)
-		{
+		for (i = 0; i < MAXSAT; i++) track_index[i] = 0;
+		for (i = 0; i < n && i < MAXOBS; i++) {
 			sat = obs[i].sat;
-			if (sat>0 && sat <= MAXSAT && obs[i].P[freq]!=0.0 && obs[i].SNR[freq]>0) track_index[sat - 1] = 1;
+			if (sat>0 && sat <= MAXSAT && obs[i].P[freq]!=0.0 && obs[i].SNR[freq]>MIN_SNR) track_index[sat - 1] = 1;
 		}
 
-		for (i = 0; i < MAXSAT; i++)
-		{
-			if (track_index[i] == 1)
-			{
-				rtk->ssat[i].lock_P[0][freq]++;
-				trace(4, "udobs_rover: sat=%3d f=%d lock=%5d\n", i + 1, freq + 1, rtk->ssat[i].lock_P[0][freq]);
+		for (i = 0; i < MAXSAT; i++) {
+			if (track_index[i] == 1) {
+				rtk->ssat[i].lock_P[obs->rcv-1][freq]++;
+				trace(4, "udobs_rover: sat=%3d f=%d lock=%5d\n", i + 1, freq + 1, rtk->ssat[i].lock_P[obs->rcv-1][freq]);
+			} else {
+				rtk->ssat[i].lock_P[obs->rcv-1][freq] = 0;
 			}
-			else rtk->ssat[i].lock_P[0][freq] = 0;
 		}
 	}
 }
 /* estimate receiver position ------------------------------------------------*/
-static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *dts,
-	const double *vare, const int *svh, const nav_t *nav, double *azel, int *vsat,
-	double *resp, rtk_t *rtk)
+static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *dts, const double *vare, const int *svh,
+						const nav_t *nav, double *azel, int *vsat, double *resp, rtk_t *rtk)
 {
 	double x[NX_F] = { 0 }, P[NX_F * NX_F], *v, *H, *var, *R, sig;
-	int i, j, k, info, stat = 0, nv, ns;
-	int row_num = n + 4 + n* rtk->opt.nf, col_num = NX_F;
+	int i, j, info, stat = SOLQ_NONE, nv, ns;
+	int row_num = n + 4 + n * rtk->opt.nf, col_num = NX_F;
 	double dt = 0.0;
 	char msg[128] = "";
 	sol_t *sol = &rtk->sol;
-	static int inittimes = 0;
 
 	trace(3, "estpos_ekf: n=%d\n", n);
 
 	dt = timediff(obs[0].time, sol->time);
 
 	/* use LSQ spp result to init the filter state */
-	if (norm(rtk->x_spp, 3) < 1000)
+	if (rtk->x_spp[0]==0.0)
 	{
 		stat = pntpos(obs, n, nav, &rtk->opt, sol, azel, rtk->ssat, msg);
+		if (stat == SOLQ_NONE) return stat;
 
-		if (stat == SOLQ_NONE || sol->ns < 6) return stat;
+		init_spp(rtk);
+		for (i = 0; i < 3; i++) 	initx(rtk, sol->rr[i], VAR_POS, i);
+		for (i = 3; i < 6; i++) 	initx(rtk, 0.1, VAR_VEL, i);
+		for (i = 6; i < 9; i++) 	initx(rtk, 1E-2, VAR_ACC, i);
+		for (i = 9; i < NX_F; i++)	initx(rtk, 0.1, SQR(30), i);
 
-		if (inittimes++ > 30)
-		{
-			init_spp(rtk);
-			for (i = 0; i < 3; i++)
-				initx(rtk, sol->rr[i], VAR_POS, i);
-			for (i = 3; i < 6; i++)
-				initx(rtk, 0.1, VAR_VEL, i);
-			for (i = 6; i < 9; i++)
-				initx(rtk, 1E-2, VAR_ACC, i);
-
-			for (i = 9; i < NX_F; i++)
-			{
-				initx(rtk, 0.1, SQR(30), i);
-			}
-		}
 		return stat;
 	}
 	else
@@ -1263,15 +1120,12 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 		udpos_spp(rtk, dt);
 		rtk->P_spp[9 + 9 * NX_F] += SQR(0.3);
 		/* add the receiver clk process noise */
-		for (i = 10; i < NX_F; i++){
+		for (i = 10; i < NX_F; i++) {
 			rtk->P_spp[i + i * NX_F] += SQR(0.1);
 		}
 	}
 
-	if (rtk->opt.spp_mode == SPP_MODE_LX)
-	{
-		row_num = 2 * n * rtk->opt.nf + 4;
-	}
+	if (rtk->opt.spp_mode == SPP_MODE_LX) row_num = 2 * n * rtk->opt.nf + 4;
 
 	v = mat(row_num, 1);
 	H = zeros(col_num, row_num);
@@ -1284,18 +1138,16 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	for (i = 0; i < 1; i++)
 	{
 		/* pseudorange residuals (m) */
-		nv = rescode_mulfreq_ekf(1, obs, n, rs, dts, vare, svh, nav, x, &rtk->opt, v, H, var, azel, vsat, resp, &ns, rtk->ssat);
+		nv = rescode_mulfreq_ekf(obs, n, rs, dts, vare, svh, nav, x, &rtk->opt, v, H, var, azel, vsat, resp, &ns, rtk->ssat);
 
-		if (ns < NX_F-6)
-		{
+		if (ns < NX_F-6) {
 			return -1;
 		}
 
 		nv += resdop_mulfreq_ekf(obs, n, rs, dts, nav, x, &rtk->opt, x + 3, azel, vsat, v + nv, var + nv, H + nv * NX_F);
 
 		/* weighted by Std */
-		for (j = 0; j < nv; j++)
-		{
+		for (j = 0; j < nv; j++) {
 			R[j * nv + j] = var[j];
 		}
 
@@ -1311,15 +1163,14 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 		trace(4, "R=\n");
 		tracemat(4, R, nv, nv, 7, 3);
 		/* kalman estimation */
-		if ((info = filter(x, P, H, v, R, NX_F, nv)))
-		{
+		if ((info = filter(x, P, H, v, R, NX_F, nv))) {
 			return -2;
 		}
 		trace(3, "after_x=\n");
 		tracemat(3, x, 1, col_num, 7, 3);
 		trace(3, "after_P=\n");
 		tracemat(3, P, col_num, col_num, 7, 3);
-		stat = SOLQ_SINGLE;
+		stat = SOLQ_DOP_SINGLE;
 	}
 
 	matcpy(rtk->x_spp, x, 1, NX_F);
@@ -1332,19 +1183,16 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	sol->dtr[2] = x[11] / CLIGHT; /* GAL-GPS time offset (s) */
 	sol->dtr[3] = x[12] / CLIGHT; /* BDS-GPS time offset (s) */
 	sol->dtr[4] = x[13] / CLIGHT; /* IRN-GPS time offset (s) */
-	for (j = 0; j < 6; j++)
-	{
+	for (j = 0; j < 6; j++) {
 		sol->rr[j] = x[j];
 	}
-	for (j = 0; j < 3; j++)
-	{
+	for (j = 0; j < 3; j++) {
 		sol->qr[j] = (float)P[j + j * NX_F];
 	}
 	sol->qr[3] = (float)P[1];        /* cov xy */
 	sol->qr[4] = (float)P[2 + NX_F]; /* cov yz */
 	sol->qr[5] = (float)P[2];        /* cov zx */
-	for (j = 0; j < 3; j++)
-	{
+	for (j = 0; j < 3; j++) {
 		sol->qv[j] = (float)P[(j + 3) + (j + 3) * NX_F];
 	}
 	sol->qv[3] = 0.0;        /* cov xy */
@@ -1352,12 +1200,10 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	sol->qv[5] = 0.0;        /* cov zx */
 	sol->ns = (uint8_t)ns;
 	sol->age = sol->ratio = 0.0;
-	sol->stat = SOLQ_SINGLE;
+	sol->stat = stat;
 
-	free(v);
-	free(H);
-	free(var);
-	free(R);
+	free(v); free(H); free(var); free(R);
+
 	return stat;
 }
 /* RAIM FDE (failure detection and exclution) -------------------------------*/
@@ -1605,17 +1451,16 @@ extern int pntpos(const obsd_t *obs, int n, const nav_t *nav,
 
 extern int pntpos_ekf(const obsd_t *obs, const int n, const nav_t *nav, rtk_t *rtk)
 {
-	double *rs, *dts, *var, *azel_, *resp,pos[3];
-	int i, stat, vsat[MAXOBS] = { 0 }, svh[MAXOBS];
+	double *rs, *dts, *var, *azel_, *resp, pos[3];
+	int stat, vsat[MAXOBS] = { 0 }, svh[MAXOBS];
 
 	trace(3, "pntpos_ekf: tobs=%s nobs=%d\n", time_str(obs[0].time, 3), n);
 	/* init spp state*/
-	if (rtk->x_spp == NULL || rtk->P_spp == NULL){
+	if (rtk->x_spp == NULL || rtk->P_spp == NULL) {
 		init_spp(rtk);
 	}
 
-	if (n <= 0)
-	{
+	if (n <= 0) {
 		return 0;
 	}
 
@@ -1628,7 +1473,7 @@ extern int pntpos_ekf(const obsd_t *obs, const int n, const nav_t *nav, rtk_t *r
 	/* satellite positons, velocities and clocks */
 	satposs(obs[0].time, obs, n, nav, rtk->opt.sateph, rs, dts, var, svh);
 
-	/* estimate receiver position with pseudorange */
+	/* estimate receiver position with pseudorange + doppler */
 	stat = estpos_ekf(obs, n, rs, dts, var, svh, nav, azel_, vsat, resp, rtk);
 	ecef2pos(rtk->sol.rr, pos);
 	trace(3, "estpos_ekf: stat=%d time=%s position=%.8lf %.8lf %.2lf\n", stat, time_str(obs[0].time, 3), pos[0] * R2D, pos[1] * R2D, pos[2]);
@@ -1639,6 +1484,7 @@ extern int pntpos_ekf(const obsd_t *obs, const int n, const nav_t *nav, rtk_t *r
 	free(var);
 	free(azel_);
 	free(resp);
+
 	return stat;
 }
 
