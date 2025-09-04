@@ -16,11 +16,12 @@ int main(int argc, char **argv)
 	solopt_t solopt = solopt_default;
 	filopt_t filopt = { "" };
 	gtime_t ts = { 0 }, te = { 0 };
-	double tint = 0.0, es[] = { 2022, 7, 21, 06, 44, 44 }, ee[] = { 2022, 7, 21, 06, 49, 01 }, pos[3] = {40.0680091,116.3355171,46};
-	int i, j, n, ret;
-	char *infile[MAXFILE] = {"/mnt/e/gnss/rover.obs",
-							 "/mnt/e/gnss/rover.nav"};
-	char *outfile =			{"/mnt/e/gnss/output.txt"};
+	double tint = 0.0, pos[3] = {40.0680091,116.3355171,46};
+	//double es[] = { 2022, 7, 21, 06, 44, 44 }, ee[] = { 2022, 7, 21, 06, 49, 01 };
+	int i, j, ret;
+	char *infile[MAXFILE] = {(char*)"/mnt/e/gnss/rover.obs",
+							 (char*)"/mnt/e/gnss/rover.nav"};
+	char *outfile =			{(char*)"/mnt/e/gnss/output.txt"};
 
 	solopt.posf = SOLF_LLH;
 	solopt.timef = 1;

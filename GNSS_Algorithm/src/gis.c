@@ -140,7 +140,7 @@ static int read_poly(FILE *fp, double *bound, gisd_t **p)
         return 0;
     }
     for (i=0;i<nt;i++) {
-        fread(buff,4,1,fp);
+        size_t bytesRead = fread(buff,4,1,fp);
         part[i]=I4_L(buff);
     }
     for (i=0;i<nt;i++) {
@@ -203,7 +203,7 @@ static int read_polygon(FILE *fp, double *bound, gisd_t **p)
         return 0;
     }
     for (i=0;i<nt;i++) {
-        fread(buff,4,1,fp);
+        size_t bytesRead = fread(buff,4,1,fp);
         part[i]=I4_L(buff);
     }
     for (i=0;i<nt;i++) {
@@ -286,7 +286,7 @@ static int gis_read_record(FILE *fp, FILE *fp_idx, int type, double *bound,
         }
         else { /* skip record */
             for (i=0;i<len1-4;i++) {
-                fread(buff,1,1,fp);
+                size_t bytesRead = fread(buff,1,1,fp);
             }
         }
     }

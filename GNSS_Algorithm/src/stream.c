@@ -82,7 +82,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/time.h>
-#define __USE_MISC
+#ifndef __USE_MISC
+#define __USE_MISC 1
+#endif
 #ifndef CRTSCTS
 #define CRTSCTS  020000000000
 #endif
