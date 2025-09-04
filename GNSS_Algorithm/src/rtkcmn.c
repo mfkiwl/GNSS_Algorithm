@@ -206,7 +206,7 @@ const prcopt_t prcopt_default={ /* defaults processing options */
     10.0*D2R,{{0,0}},           /* elmin,snrmask */
     0,3,3,1,1,1,                /* sateph,modear,glomodear,gpsmodear,bdsmodear,arfilter */
     20,0,4,5,10,20,             /* maxout,minlock,minfixsats,minholdsats,mindropsats,minfix */
-    1,1,0,1,0,                  /* armaxiter,estion,esttrop,dynamics,tidecorr */
+    1,1,1,1,0,                  /* armaxiter,estion,esttrop,dynamics,tidecorr */
     1,0,0,0,0,                  /* niter,codesmooth,intpref,sbascorr,sbassatsel */
     0,0,                        /* rovpos,refpos */
     {300.0,100.0,100.0},        /* eratio[] */
