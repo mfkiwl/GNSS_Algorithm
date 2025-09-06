@@ -50,7 +50,7 @@
 #define VAR_POS     SQR(30.0)	/* initial variance of receiver pos (m^2) */
 #define VAR_VEL     SQR(10.0)	/* initial variance of receiver vel ((m/s)^2) */
 #define VAR_ACC     SQR(10.0)	/* initial variance of receiver acc ((m/ss)^2) */
-#define NX_F		(9 + 1 + 4)	/* 位置*3 速度*3 加速度*3 接收机钟差*1 GNSS系统间群延迟*4 */
+#define NX_F		(9+1+4+1)	/* 位置*3 速度*3 加速度*3 接收机钟差*1 GNSS系统间群延迟*4 接收机钟漂*1 */
 
 /* pseudorange measurement error variance ------------------------------------*/
 static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys, int freq)
@@ -660,7 +660,7 @@ static int rescode_mulfreq_ekf(const obsd_t *obs, int n, const double *rs, const
 {
 	gtime_t time;
 	double r, freq, dion_ref, dion, dtrp, vmeas, vion, vtrp, rr[3], pos[3], dtr, e[3], P;
-	int i, j, nv = 0, sat, sys, mask[NX_F - 9] = { 0 };
+	int i, j, nv = 0, sat, sys, mask[NX_F - 9 - 1] = { 0 };
 	int freq_idx, nf;
 
 	trace(3, "rescode_mulfreq_ekf : n=%d\n", n);
@@ -739,7 +739,7 @@ static int rescode_mulfreq_ekf(const obsd_t *obs, int n, const double *rs, const
 		(*ns)++;
 	}
 	/* constraint to avoid rank-deficient */
-	for (i = 0; i < NX_F - 9; i++) {
+	for (i = 0; i < NX_F - 9 - 1; i++) {
 		if (mask[i]) continue;
 		v[nv] = 0.0;
 		for (j = 0; j < NX_F; j++) H[j + nv * NX_F] = j == i + 9 ? 1.0 : 0.0;
@@ -748,16 +748,67 @@ static int rescode_mulfreq_ekf(const obsd_t *obs, int n, const double *rs, const
 
 	return nv;
 }
+/* doppler residuals with std mode --------------------------------------------*/
+static int resdop_mulfreq_ekf_std(const obsd_t *obs, const int n, const double *rs, const double *dts, const nav_t *nav, const double *rr,
+							  	  const prcopt_t *opt, const double *x, const double *azel, const int *vsat, double *v, double *var, double *H)
+{
+	double freq, rate, pos[3], E[9], a[3], e[3], vs[3], cosel;
+    int i, j, nv = 0, sys, freq_idx;
+
+    trace(3, "resdop_mulfreq_ekf_std  : n=%d\n", n);
+
+    ecef2pos(rr, pos); xyz2enu(pos, E);
+
+	for (i = 0; i < n && i < MAXOBS; i++)
+    {
+        if (!(sys = satsys(obs[i].sat, NULL)) || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0) continue;
+        /* LOS (line-of-sight) vector in ECEF */
+        cosel = cos(azel[1 + i * 2]);
+        a[0] = sin(azel[i * 2]) * cosel;
+        a[1] = cos(azel[i * 2]) * cosel;
+        a[2] = sin(azel[1 + i * 2]);
+        matmul("TN", 3, 1, 3, 1.0, E, a, 0.0, e);
+        /* satellite velocity relative to receiver in ECEF */
+        for (j = 0; j < 3; j++) {
+            vs[j] = rs[j + 3 + i * 6] - x[j];
+        }
+        /* range rate with earth rotation correction */
+        rate = dot(vs, e, 3) + OMGE / CLIGHT * (rs[4 + i * 6] * rr[0] + rs[1 + i * 6] * x[0] - rs[3 + i * 6] * rr[1] - rs[i * 6] * x[1]);
+        for (freq_idx = 0; freq_idx < opt->nf; freq_idx++) {
+            freq = sat2freq(obs[i].sat, obs[i].code[freq_idx], nav);
+
+            if (obs[i].D[freq_idx] == 0.0 || freq == 0.0) continue;
+            /* range rate residual (m/s). */
+            v[nv] = -obs[i].D[freq_idx] * CLIGHT / freq - (rate + x[NX_F-1] - CLIGHT * dts[1 + i * 2]);
+            /* variance of doppler error */
+			var[nv] = varerr_dop(opt, &obs[i], azel[1 + i * 2], sys, freq_idx);
+			if (fabs(v[nv])>0.5) {
+				var[nv] *= SQR(fabs(v[nv]) / 0.5);
+			}
+            /* design matrix */
+            for (j = 0; j < 3; j++) {
+                H[j + 3 + nv * NX_F] = -e[j];
+            }
+			H[NX_F-1 + nv * NX_F] = 1.0;
+            nv++;
+
+			trace(3, "sat=%3d azel=%5.1f %4.1f f=%1d snr=%2d residual=%7.3f sig=%5.3f\n", obs[i].sat, azel[i * 2] * R2D, azel[1 + i * 2] * R2D,
+				freq_idx + 1, obs[i].SNR[freq_idx], v[nv - 1], sqrt(var[nv - 1]));
+        }
+    }
+
+    return nv;
+}
+/* doppler residuals with single diff mode ------------------------------------*/
 static int resdop_mulfreq_ekf(const obsd_t *obs, const int n, const double *rs, const double *dts, const nav_t *nav, const double *rr,
 							  const prcopt_t *opt, const double *x, const double *azel, const int *vsat, double *v, double *var, double *H)
 {
     double freq, rate, pos[3], E[9], a[3], e[3], vs[3], cosel, sig, e_ref[3] = {0.0}, v_ref = 0.0, ele_ref=0.0;
-    int i, j, nv = 0, sys, freq_idx, SNR_ref=0, ind_ref=-1, freq_ref=-1;;
+    int i, j, nv = 0, sys, freq_idx, SNR_ref=0, ind_ref=-1, freq_ref=-1;
 
     trace(3, "resdop_mulfreq_ekf  : n=%d\n", n);
 
-    ecef2pos(rr, pos);
-    xyz2enu(pos, E);
+    ecef2pos(rr, pos); xyz2enu(pos, E);
 
 	for (i = 0; i < n && i < MAXOBS; i++)
     {
@@ -1085,13 +1136,14 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 		//udobs_rover(obs, n, rtk);
 		udpos_spp(rtk, dt);
 		rtk->P_spp[9 + 9 * NX_F] += SQR(0.3);
+		rtk->P_spp[NX_F - 1 + (NX_F - 1) * NX_F] += SQR(0.3);
 		/* add the receiver clk process noise */
-		for (i = 10; i < NX_F; i++) {
+		for (i = 10; i < NX_F - 1; i++) {
 			rtk->P_spp[i + i * NX_F] += SQR(0.1);
 		}
 	}
 
-	if (rtk->opt.spp_mode == SPP_MODE_LX) row_num = 2 * n * rtk->opt.nf + 4;
+	if (rtk->opt.spp_mode == SPP_MODE_LX) row_num = 2 * n * rtk->opt.nf + 4 + 1;
 
 	v = mat(row_num, 1);
 	H = zeros(col_num, row_num);
@@ -1106,7 +1158,7 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 		/* pseudorange residuals (m) */
 		nv = rescode_mulfreq_ekf(obs, n, rs, dts, vare, svh, nav, x, &rtk->opt, v, H, var, azel, vsat, resp, &ns, rtk->ssat);
 
-		if (ns < NX_F-6) {
+		if (ns < 3 + 1 + 1 + 3) {
 			return -1;
 		}
 
