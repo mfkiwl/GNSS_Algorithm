@@ -1126,9 +1126,9 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 		if (sol->ns < 3 + 1 + 1 + 3) return stat;
 
 		for (i = 0; i < 3; i++) 		initx(rtk, sol->rr[i], VAR_POS, i);
-		for (i = 3; i < 6; i++) 		initx(rtk, sol->rr[i], VAR_VEL, i);
+		for (i = 3; i < 6; i++) 		initx(rtk, sol->rr[i] + 1E-2, VAR_VEL, i);
 		for (i = 6; i < 9; i++) 		initx(rtk, 1E-2, VAR_ACC, i);
-		for (i = 9; i < NX_F-1; i++)	initx(rtk, sol->dtr[i-9]*CLIGHT, SQR(30), i);
+		for (i = 9; i < NX_F-1; i++)	initx(rtk, sol->dtr[i-9]*CLIGHT + 1E-2, SQR(30), i);
 		for (i = NX_F-1; i < NX_F; i++)	initx(rtk, 0.1, SQR(30), i);
 
 		return stat;
