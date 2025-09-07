@@ -490,7 +490,7 @@ static int rescode(int iter, const obsd_t *obs, int n, const double *rs,
         
         /* pseudorange residual */
         v[nv]=P-(r+dtr-CLIGHT*dts[i*2]+dion+dtrp);
-        trace(4,"sat=%d: v=%.3f P=%.3f r=%.3f dtr=%.6f dts=%.6f dion=%.3f dtrp=%.3f\n",
+        trace(3,"sat=%d: v=%.3f P=%.3f r=%.3f dtr=%.6f dts=%.6f dion=%.3f dtrp=%.3f\n",
             sat,v[nv],P,r,dtr,dts[i*2],dion,dtrp);
         
         /* design matrix */
@@ -1123,11 +1123,13 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	{
 		stat = pntpos(obs, n, nav, &rtk->opt, sol, azel, rtk->ssat, msg);
 		if (stat == SOLQ_NONE) return stat;
+		if (sol->ns < 3 + 1 + 1 + 3) return stat;
 
-		for (i = 0; i < 3; i++) 	initx(rtk, sol->rr[i], VAR_POS, i);
-		for (i = 3; i < 6; i++) 	initx(rtk, 0.1, VAR_VEL, i);
-		for (i = 6; i < 9; i++) 	initx(rtk, 1E-2, VAR_ACC, i);
-		for (i = 9; i < NX_F; i++)	initx(rtk, 0.1, SQR(30), i);
+		for (i = 0; i < 3; i++) 		initx(rtk, sol->rr[i], VAR_POS, i);
+		for (i = 3; i < 6; i++) 		initx(rtk, sol->rr[i], VAR_VEL, i);
+		for (i = 6; i < 9; i++) 		initx(rtk, 1E-2, VAR_ACC, i);
+		for (i = 9; i < NX_F-1; i++)	initx(rtk, sol->dtr[i-9]*CLIGHT, SQR(30), i);
+		for (i = NX_F-1; i < NX_F; i++)	initx(rtk, 0.1, SQR(30), i);
 
 		return stat;
 	}
@@ -1467,10 +1469,17 @@ extern int pntpos(const obsd_t *obs, int n, const nav_t *nav,
     return stat;
 }
 
+static int cmpres(const void *p1, const void *p2)
+{
+    double *q1=(double *)p1,*q2=(double *)p2;
+
+    return *q1 - *q2;
+}
+
 extern int pntpos_ekf(const obsd_t *obs, const int n, const nav_t *nav, rtk_t *rtk)
 {
 	double *rs, *dts, *var, *azel_, *resp, pos[3];
-	int stat, vsat[MAXOBS] = { 0 }, svh[MAXOBS];
+	int i, stat, vsat[MAXOBS] = { 0 }, svh[MAXOBS], n_used = 0;
 
 	trace(3, "pntpos_ekf: tobs=%s nobs=%d\n", time_str(obs[0].time, 3), n);
 	/* init spp state*/
@@ -1493,6 +1502,20 @@ extern int pntpos_ekf(const obsd_t *obs, const int n, const nav_t *nav, rtk_t *r
 
 	/* estimate receiver position with pseudorange + doppler */
 	stat = estpos_ekf(obs, n, rs, dts, var, svh, nav, azel_, vsat, resp, rtk);
+	if (stat == SOLQ_DOP_SINGLE) {
+		/* 伪距残差异常检测 */
+		for (i = 0; i < n; i++) {
+			if (vsat[i]) resp[n_used++] = resp[i];
+		}
+		if (n_used > 4) {
+			qsort(resp,n_used,sizeof(double),cmpres);
+			if (fabs(resp[n_used/2]) > 30) {
+				init_spp(rtk);
+				stat = SOLQ_SINGLE;
+				trace(3, "init ekf because residual abnormal, middle res=%.3lf\n", resp[n_used/2]);
+			}
+		}
+	}
 	ecef2pos(rtk->sol.rr, pos);
 	trace(3, "estpos_ekf: stat=%d time=%s position=%.8lf %.8lf %.2lf\n", stat, time_str(obs[0].time, 3), pos[0] * R2D, pos[1] * R2D, pos[2]);
 	printf("estpos_ekf: stat=%d time=%s nobs=%d position=%.8lf %.8lf %.2lf\n", stat, time_str(obs[0].time, 3), n, pos[0] * R2D, pos[1] * R2D, pos[2]);
