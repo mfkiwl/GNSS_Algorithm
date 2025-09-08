@@ -1505,7 +1505,7 @@ extern int pntpos_ekf(const obsd_t *obs, const int n, const nav_t *nav, rtk_t *r
 	if (stat == SOLQ_DOP_SINGLE) {
 		/* 伪距残差异常检测 */
 		for (i = 0; i < n; i++) {
-			if (vsat[i]) resp[n_used++] = resp[i];
+			if (vsat[i]) resp[n_used++] = fabs(resp[i]);
 		}
 		if (n_used > 4) {
 			qsort(resp,n_used,sizeof(double),cmpres);
